@@ -59,6 +59,14 @@ const EvaluationBar: React.FC<EvaluationBarProps> = ({
       }
     };
 
+    ws.current.onerror = (error) => {
+      console.error("WebSocket error:", error);
+      // Try to reconnect on error
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
+
     return () => {
       if (ws.current) {
         ws.current.close();
@@ -66,16 +74,32 @@ const EvaluationBar: React.FC<EvaluationBarProps> = ({
     };
   }, []);
 
+  // Reset evaluation when FEN changes to provide immediate feedback
+  useEffect(() => {
+    // Optional: Reset or adjust evaluation values when position changes
+    // This provides visual feedback while waiting for the new evaluation
+    setDepth(0); // Reset depth to show calculation is in progress
+  }, [fen]);
+
   // Send new position to WebSocket when FEN changes
   useEffect(() => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN && fen) {
-      ws.current.send(
-        JSON.stringify({
-          fen,
-          depth: 18,
-          variants: 1,
-        })
-      );
+      try {
+        ws.current.send(
+          JSON.stringify({
+            fen,
+            depth: 18,
+            variants: 1,
+          })
+        );
+      } catch (error) {
+        console.error("Error sending position to WebSocket:", error);
+        // Attempt to reconnect
+        ws.current = new WebSocket("wss://chess-api.com/v1");
+      }
+    } else if (ws.current && ws.current.readyState === WebSocket.CLOSED) {
+      // Connection was closed, try to reopen
+      ws.current = new WebSocket("wss://chess-api.com/v1");
     }
   }, [fen]);
 

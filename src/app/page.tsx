@@ -5,6 +5,7 @@ import { Chess, Move, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import MoveHistory from "../components/MoveHistory";
 import EvaluationBar from "../components/EvalBar";
+import BestMove from "../components/BestMove";
 import { ChevronDown } from "lucide-react";
 
 interface CustomSquareStyles {
@@ -60,6 +61,7 @@ const PIECE_SYMBOLS_BY_COLOR = {
 export default function Home() {
   const [game, setGame] = useState<Chess>(new Chess());
   const [moveSquares, setMoveSquares] = useState<CustomSquareStyles>({});
+  const [bestMoveArrow, setBestMoveArrow] = useState<{from: string, to: string} | null>(null);
   const [selectedPiece, setSelectedPiece] = useState<Square | null>(null);
   const [boardWidth, setBoardWidth] = useState<number>(400);
   const [moveHistory, setMoveHistory] = useState<MoveHistoryI[]>([]);
@@ -75,6 +77,15 @@ export default function Home() {
     black: false,
   });
   const [previousPosition, setPreviousPosition] = useState<string>(game.fen());
+  const [showEvalBar, setShowEvalBar] = useState<boolean>(true);
+  const [showBestMove, setShowBestMove] = useState<boolean>(false);
+
+  // Effect to clear best move arrow when best move is toggled off
+  useEffect(() => {
+    if (!showBestMove) {
+      setBestMoveArrow(null);
+    }
+  }, [showBestMove]);
 
   useEffect(() => {
     const calculateSize = () => {
@@ -320,12 +331,15 @@ export default function Home() {
     <div className="h-full flex flex-col p-4">
       <div className="flex-1 flex gap-8 justify-center items-start min-h-0">
         <div className="flex flex-col min-h-0">
-          <div className="flex items-start">
-            <EvaluationBar
-              fen={game.fen()}
-              height={boardWidth}
-              orientation={boardOrientation}
-            />
+          <div className="flex items-start relative">
+            {/* Always render EvaluationBar but control visibility with CSS */}
+            <div className={`${showEvalBar ? 'opacity-100' : 'opacity-0 pointer-events-none'} transition-opacity duration-300`}>
+              <EvaluationBar
+                fen={game.fen()}
+                height={boardWidth}
+                orientation={boardOrientation}
+              />
+            </div>
             <div style={{ width: boardWidth }}>
               <div className="flex justify-between items-center mb-2 h-[40px]">
                 <div className="relative">
@@ -377,6 +391,7 @@ export default function Home() {
                 customSquareStyles={moveSquares}
                 boardWidth={boardWidth}
                 boardOrientation={boardOrientation}
+                customArrows={bestMoveArrow ? [[bestMoveArrow.from, bestMoveArrow.to, '#4ADE80']] : []}
               />
 
               <div className="flex justify-between items-center mt-2 h-[40px]">
@@ -421,6 +436,19 @@ export default function Home() {
               </div>
             </div>
           </div>
+          
+          {/* Best Move Component */}
+          <BestMove
+            fen={game.fen()}
+            visible={showBestMove}
+            onMoveSuggestion={(from, to) => {
+              if (showBestMove) {
+                setBestMoveArrow({ from, to });
+              } else {
+                setBestMoveArrow(null);
+              }
+            }}
+          />
         </div>
 
         <MoveHistory
@@ -429,6 +457,10 @@ export default function Home() {
           onFlipBoard={flipBoard}
           onNewGame={resetGame}
           currentTurn={getCurrentTurn()}
+          showEvalBar={showEvalBar}
+          showBestMove={showBestMove}
+          onToggleEvalBar={setShowEvalBar}
+          onToggleBestMove={setShowBestMove}
         />
       </div>
     </div>
