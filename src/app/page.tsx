@@ -61,7 +61,10 @@ const PIECE_SYMBOLS_BY_COLOR = {
 export default function Home() {
   const [game, setGame] = useState<Chess>(new Chess());
   const [moveSquares, setMoveSquares] = useState<CustomSquareStyles>({});
-  const [bestMoveArrow, setBestMoveArrow] = useState<{from: string, to: string} | null>(null);
+  const [bestMoveArrow, setBestMoveArrow] = useState<{
+    from: string;
+    to: string;
+  } | null>(null);
   const [selectedPiece, setSelectedPiece] = useState<Square | null>(null);
   const [boardWidth, setBoardWidth] = useState<number>(400);
   const [moveHistory, setMoveHistory] = useState<MoveHistoryI[]>([]);
@@ -79,6 +82,11 @@ export default function Home() {
   const [previousPosition, setPreviousPosition] = useState<string>(game.fen());
   const [showEvalBar, setShowEvalBar] = useState<boolean>(true);
   const [showBestMove, setShowBestMove] = useState<boolean>(false);
+  const [testResponse, setTestResponse] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [testMessage, setTestMessage] = useState<string>(
+    "Test request from chess app"
+  );
 
   // Effect to clear best move arrow when best move is toggled off
   useEffect(() => {
@@ -327,13 +335,37 @@ export default function Home() {
     return { value: 0, side: null };
   }
 
+  async function handleTestRequest() {
+    setIsLoading(true);
+    try {
+      const response = await fetch("http://localhost:8000/api/test", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ message: testMessage }),
+      });
+
+      const data = await response.json();
+      setTestResponse(data);
+    } catch (error) {
+      setTestResponse({ error: error.message });
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   return (
     <div className="h-full flex flex-col p-4">
       <div className="flex-1 flex gap-8 justify-center items-start min-h-0">
         <div className="flex flex-col min-h-0">
           <div className="flex items-start relative">
             {/* Always render EvaluationBar but control visibility with CSS */}
-            <div className={`${showEvalBar ? 'opacity-100' : 'opacity-0 pointer-events-none'} transition-opacity duration-300`}>
+            <div
+              className={`${
+                showEvalBar ? "opacity-100" : "opacity-0 pointer-events-none"
+              } transition-opacity duration-300`}
+            >
               <EvaluationBar
                 fen={game.fen()}
                 height={boardWidth}
@@ -391,7 +423,11 @@ export default function Home() {
                 customSquareStyles={moveSquares}
                 boardWidth={boardWidth}
                 boardOrientation={boardOrientation}
-                customArrows={bestMoveArrow ? [[bestMoveArrow.from, bestMoveArrow.to, '#4ADE80']] : []}
+                customArrows={
+                  bestMoveArrow
+                    ? [[bestMoveArrow.from, bestMoveArrow.to, "#4ADE80"]]
+                    : []
+                }
               />
 
               <div className="flex justify-between items-center mt-2 h-[40px]">
@@ -436,7 +472,7 @@ export default function Home() {
               </div>
             </div>
           </div>
-          
+
           {/* Best Move Component */}
           <BestMove
             fen={game.fen()}
@@ -449,6 +485,60 @@ export default function Home() {
               }
             }}
           />
+
+          {/* Test Request Input and Button */}
+          <div className="mt-4 w-full flex flex-col items-center">
+            <div className="w-full max-w-md flex gap-2 mb-2">
+              <input
+                type="text"
+                value={testMessage}
+                onChange={(e) => setTestMessage(e.target.value)}
+                className="flex-1 p-2 border border-gray-300 rounded-md bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter message to send..."
+              />
+              <button
+                onClick={handleTestRequest}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors whitespace-nowrap"
+                disabled={isLoading}
+              >
+                {isLoading ? "Sending..." : "Send Request"}
+              </button>
+            </div>
+
+            {testResponse && (
+              <div className="mt-2 p-4 bg-gray-800 text-white rounded-lg w-full max-w-md">
+                {testResponse.error ? (
+                  <div className="text-red-400 font-mono">
+                    <span className="font-bold">Error:</span>{" "}
+                    {testResponse.error}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="bg-blue-900/50 p-2 rounded">
+                      <span className="font-semibold text-blue-300">
+                        Status:
+                      </span>
+                      <span className="ml-2">{testResponse.status}</span>
+                    </div>
+                    <div className="bg-blue-900/50 p-2 rounded">
+                      <span className="font-semibold text-blue-300">
+                        You sent:
+                      </span>
+                      <span className="ml-2 font-mono">
+                        {testResponse.received}
+                      </span>
+                    </div>
+                    <div className="bg-green-900/50 p-2 rounded">
+                      <span className="font-semibold text-green-300">
+                        Response:
+                      </span>
+                      <span className="ml-2">{testResponse.response}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <MoveHistory
