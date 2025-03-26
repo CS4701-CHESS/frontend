@@ -6,7 +6,6 @@ import { Chessboard } from "react-chessboard";
 import MoveHistory from "../components/MoveHistory";
 import EvaluationBar from "../components/EvalBar";
 import BestMove from "../components/BestMove";
-import { ChevronDown } from "lucide-react";
 
 interface CustomSquareStyles {
   [square: string]: {
@@ -58,6 +57,10 @@ const PIECE_SYMBOLS_BY_COLOR = {
   },
 };
 
+// AI player types
+type PlayerType = "human" | "ai";
+type AILevel = 2 | 3 | 4;
+
 export default function Home() {
   const [game, setGame] = useState<Chess>(new Chess());
   const [moveSquares, setMoveSquares] = useState<CustomSquareStyles>({});
@@ -75,18 +78,16 @@ export default function Home() {
     white: CapturedPiece[];
     black: CapturedPiece[];
   }>({ white: [], black: [] });
-  const [dropdownOpen, setDropdownOpen] = useState({
-    white: false,
-    black: false,
-  });
   const [previousPosition, setPreviousPosition] = useState<string>(game.fen());
   const [showEvalBar, setShowEvalBar] = useState<boolean>(true);
   const [showBestMove, setShowBestMove] = useState<boolean>(false);
-  const [testResponse, setTestResponse] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [testMessage, setTestMessage] = useState<string>(
-    "Test request from chess app"
-  );
+  const [isThinking, setIsThinking] = useState<boolean>(false);
+
+  // AI configuration
+  const [whitePlayer, setWhitePlayer] = useState<PlayerType>("human");
+  const [blackPlayer, setBlackPlayer] = useState<PlayerType>("ai");
+  const [aiLevel, setAiLevel] = useState<AILevel>(2);
+  const [aiEvaluation, setAiEvaluation] = useState<number | null>(null);
 
   // Effect to clear best move arrow when best move is toggled off
   useEffect(() => {
@@ -95,6 +96,42 @@ export default function Home() {
     }
   }, [showBestMove]);
 
+  // Effect to handle AI moves
+  useEffect(() => {
+    const makeAiMove = async () => {
+      if (game.isGameOver()) return;
+
+      const currentTurn = game.turn() === "w" ? "white" : "black";
+      const currentPlayer = currentTurn === "white" ? whitePlayer : blackPlayer;
+
+      if (currentPlayer === "ai") {
+        setIsThinking(true);
+        try {
+          // Get AI move from backend
+          const move = await fetchAiMove(
+            game.fen(),
+            aiLevel,
+            currentTurn === "white"
+          );
+          if (move) {
+            makeAMove({
+              from: move.from as Square,
+              to: move.to as Square,
+              promotion: move.promotion as string | undefined,
+            });
+          }
+        } catch (error) {
+          // Error handled silently - no fallback
+        } finally {
+          setIsThinking(false);
+        }
+      }
+    };
+
+    makeAiMove();
+  }, [game, whitePlayer, blackPlayer, aiLevel]);
+
+  // Responsive board sizing
   useEffect(() => {
     const calculateSize = () => {
       const navbarHeight = 64;
@@ -127,6 +164,156 @@ export default function Home() {
     window.addEventListener("resize", calculateSize);
     return () => window.removeEventListener("resize", calculateSize);
   }, []);
+
+  // Function to convert numeric square index to algebraic notation (a1, h8, etc.)
+  function indexToSquare(index: number): Square {
+    if (index < 0 || index > 63) {
+      throw new Error(`Invalid square index: ${index}`);
+    }
+
+    const file = String.fromCharCode(97 + (index % 8)); // 'a' through 'h'
+    const rank = Math.floor(index / 8) + 1; // 1 through 8
+
+    return `${file}${rank}` as Square;
+  }
+
+  // Clean fetchAiMove function with no debugging logs
+  async function fetchAiMove(fen: string, depth: number, isWhite: boolean) {
+    try {
+      // Create request data
+      const requestData = {
+        fen: fen,
+        message: fen,
+        depth: depth,
+        isWhite: isWhite,
+      };
+
+      // Make the request
+      const response = await fetch("http://localhost:8000/api/move", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestData),
+      });
+
+      // Check for HTTP errors
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      // Get response text
+      const responseText = await response.text();
+
+      // Parse the JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (jsonError) {
+        throw new Error(`Invalid JSON response`);
+      }
+
+      if (data.move === undefined || data.move === null) {
+        throw new Error("AI response missing move data");
+      }
+
+      // Set evaluation if provided
+      if (data.eval !== undefined) {
+        setAiEvaluation(data.eval);
+      }
+
+      // Process move data based on its format
+      let moveFrom: Square | null = null;
+      let moveTo: Square | null = null;
+      let promotion: string | undefined = undefined;
+
+      if (typeof data.move === "string") {
+        // String format (e.g., "g8f6")
+        if (data.move.length >= 4) {
+          moveFrom = data.move.substring(0, 2) as Square;
+          moveTo = data.move.substring(2, 4) as Square;
+
+          if (data.move.length > 4) {
+            promotion = data.move.substring(4, 5);
+          }
+        } else {
+          throw new Error(`Invalid move format: ${data.move}`);
+        }
+      } else if (typeof data.move === "object" && data.move !== null) {
+        // First, check for the format with from/to properties
+        if (data.move.from && data.move.to) {
+          moveFrom = data.move.from as Square;
+          moveTo = data.move.to as Square;
+          promotion = data.move.promotion;
+        }
+        // Second, check for the format with from_square/to_square as numeric indices
+        else if (
+          data.move.from_square !== undefined &&
+          data.move.to_square !== undefined
+        ) {
+          try {
+            moveFrom = indexToSquare(data.move.from_square);
+            moveTo = indexToSquare(data.move.to_square);
+
+            if (
+              data.move.promotion !== undefined &&
+              data.move.promotion !== null
+            ) {
+              promotion = data.move.promotion;
+            }
+          } catch (conversionError) {
+            throw new Error(`Failed to convert square indices`);
+          }
+        } else {
+          throw new Error("Invalid move object format from AI");
+        }
+      } else {
+        throw new Error(`Unrecognized move format: ${typeof data.move}`);
+      }
+
+      if (!moveFrom || !moveTo) {
+        throw new Error("Failed to extract valid move coordinates");
+      }
+
+      // Create a move object
+      const moveObj = {
+        from: moveFrom,
+        to: moveTo,
+        promotion: promotion,
+      };
+
+      // Validate the move is legal in the current position
+      const gameCopy = new Chess(fen);
+
+      try {
+        const validMove = gameCopy.move(moveObj);
+
+        if (validMove) {
+          return moveObj;
+        } else {
+          // Try using the SAN move format
+          try {
+            const sanMove = new Chess(fen).move(data.move);
+            if (sanMove) {
+              return {
+                from: sanMove.from as Square,
+                to: sanMove.to as Square,
+                promotion: sanMove.promotion as string | undefined,
+              };
+            }
+          } catch (sanError) {
+            // Silent catch - no logging
+          }
+
+          throw new Error(`AI returned invalid move`);
+        }
+      } catch (moveError) {
+        throw moveError;
+      }
+    } catch (error) {
+      return null;
+    }
+  }
 
   function detectCapture(oldFen: string, newFen: string) {
     const oldPosition = new Chess(oldFen);
@@ -251,6 +438,14 @@ export default function Home() {
   }
 
   function onSquareClick(square: Square): void {
+    // Don't allow moves if it's the AI's turn
+    const currentTurn = getCurrentTurn();
+    const currentPlayer = currentTurn === "white" ? whitePlayer : blackPlayer;
+
+    if (currentPlayer === "ai" || isThinking) {
+      return;
+    }
+
     const piece = game.get(square);
 
     if (selectedPiece) {
@@ -278,11 +473,27 @@ export default function Home() {
   }
 
   function onPieceDragBegin(_piece: string, square: Square): void {
+    // Don't allow moves if it's the AI's turn
+    const currentTurn = getCurrentTurn();
+    const currentPlayer = currentTurn === "white" ? whitePlayer : blackPlayer;
+
+    if (currentPlayer === "ai" || isThinking) {
+      return;
+    }
+
     setSelectedPiece(square);
     getMoveOptions(square);
   }
 
   function onDrop(sourceSquare: Square, targetSquare: Square): boolean {
+    // Don't allow moves if it's the AI's turn
+    const currentTurn = getCurrentTurn();
+    const currentPlayer = currentTurn === "white" ? whitePlayer : blackPlayer;
+
+    if (currentPlayer === "ai" || isThinking) {
+      return false;
+    }
+
     const move = makeAMove({
       from: sourceSquare,
       to: targetSquare,
@@ -292,13 +503,23 @@ export default function Home() {
   }
 
   function getGameStatus(): string {
+    if (isThinking) {
+      return "AI is thinking...";
+    }
+
     if (game.isGameOver()) {
       if (game.isDraw()) {
         return "Draw!";
       }
       return `${game.turn() === "w" ? "Black" : "White"} wins!`;
     }
-    return `${game.turn() === "w" ? "White" : "Black"} to move`;
+
+    const currentTurn = getCurrentTurn();
+    const currentPlayer = currentTurn === "white" ? whitePlayer : blackPlayer;
+
+    return `${
+      currentTurn === "white" ? "White" : "Black"
+    } to move (${currentPlayer})`;
   }
 
   function resetGame() {
@@ -308,6 +529,7 @@ export default function Home() {
     setMoveHistory([]);
     setCapturedPieces({ white: [], black: [] });
     setPreviousPosition(new Chess().fen());
+    setAiEvaluation(null);
   }
 
   function flipBoard() {
@@ -335,24 +557,16 @@ export default function Home() {
     return { value: 0, side: null };
   }
 
-  async function handleTestRequest() {
-    setIsLoading(true);
-    try {
-      const response = await fetch("http://localhost:8000/api/test", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message: testMessage }),
-      });
-
-      const data = await response.json();
-      setTestResponse(data);
-    } catch (error) {
-      setTestResponse({ error: error.message });
-    } finally {
-      setIsLoading(false);
+  function toggleAIControl(color: "white" | "black") {
+    if (color === "white") {
+      setWhitePlayer((prev) => (prev === "human" ? "ai" : "human"));
+    } else {
+      setBlackPlayer((prev) => (prev === "human" ? "ai" : "human"));
     }
+  }
+
+  function changeAiLevel(level: AILevel) {
+    setAiLevel(level);
   }
 
   return (
@@ -360,7 +574,7 @@ export default function Home() {
       <div className="flex-1 flex gap-8 justify-center items-start min-h-0">
         <div className="flex flex-col min-h-0">
           <div className="flex items-start relative">
-            {/* Always render EvaluationBar but control visibility with CSS */}
+            {/* Evaluation Bar */}
             <div
               className={`${
                 showEvalBar ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -370,32 +584,25 @@ export default function Home() {
                 fen={game.fen()}
                 height={boardWidth}
                 orientation={boardOrientation}
+                aiEvaluation={aiEvaluation}
               />
             </div>
+
             <div style={{ width: boardWidth }}>
+              {/* Black Controls */}
               <div className="flex justify-between items-center mb-2 h-[40px]">
-                <div className="relative">
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-medium">Black:</span>
                   <button
-                    onClick={() =>
-                      setDropdownOpen((prev) => ({
-                        ...prev,
-                        black: !prev.black,
-                      }))
-                    }
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700"
+                    onClick={() => toggleAIControl("black")}
+                    className={`px-4 py-2 rounded text-white transition-colors ${
+                      blackPlayer === "ai"
+                        ? "bg-blue-600 hover:bg-blue-700"
+                        : "bg-gray-700 hover:bg-gray-600"
+                    }`}
                   >
-                    Black Menu <ChevronDown size={20} />
+                    {blackPlayer === "ai" ? "AI" : "Human"}
                   </button>
-                  {dropdownOpen.black && (
-                    <div className="absolute top-full left-0 mt-2 w-48 bg-gray-800 shadow-lg rounded-lg p-2 z-10">
-                      <button className="w-full text-left px-4 py-2 text-white hover:bg-gray-700 rounded">
-                        Option 1
-                      </button>
-                      <button className="w-full text-left px-4 py-2 text-white hover:bg-gray-700 rounded">
-                        Option 2
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {capturedPieces.black.length > 0 && (
@@ -414,6 +621,7 @@ export default function Home() {
                 )}
               </div>
 
+              {/* Chessboard */}
               <Chessboard
                 id="BasicBoard"
                 position={game.fen()}
@@ -430,29 +638,20 @@ export default function Home() {
                 }
               />
 
+              {/* White Controls */}
               <div className="flex justify-between items-center mt-2 h-[40px]">
-                <div className="relative">
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-medium">White:</span>
                   <button
-                    onClick={() =>
-                      setDropdownOpen((prev) => ({
-                        ...prev,
-                        white: !prev.white,
-                      }))
-                    }
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600"
+                    onClick={() => toggleAIControl("white")}
+                    className={`px-4 py-2 rounded text-white transition-colors ${
+                      whitePlayer === "ai"
+                        ? "bg-blue-600 hover:bg-blue-700"
+                        : "bg-gray-700 hover:bg-gray-600"
+                    }`}
                   >
-                    White Menu <ChevronDown size={20} />
+                    {whitePlayer === "ai" ? "AI" : "Human"}
                   </button>
-                  {dropdownOpen.white && (
-                    <div className="absolute top-full left-0 mt-2 w-48 bg-gray-800 shadow-lg rounded-lg p-2 z-10">
-                      <button className="w-full text-left px-4 py-2 text-white hover:bg-gray-700 rounded">
-                        Option 1
-                      </button>
-                      <button className="w-full text-left px-4 py-2 text-white hover:bg-gray-700 rounded">
-                        Option 2
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 {capturedPieces.white.length > 0 && (
@@ -486,58 +685,38 @@ export default function Home() {
             }}
           />
 
-          {/* Test Request Input and Button */}
-          <div className="mt-4 w-full flex flex-col items-center">
-            <div className="w-full max-w-md flex gap-2 mb-2">
-              <input
-                type="text"
-                value={testMessage}
-                onChange={(e) => setTestMessage(e.target.value)}
-                className="flex-1 p-2 border border-gray-300 rounded-md bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter message to send..."
-              />
-              <button
-                onClick={handleTestRequest}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors whitespace-nowrap"
-                disabled={isLoading}
-              >
-                {isLoading ? "Sending..." : "Send Request"}
-              </button>
-            </div>
+          {/* Game Status and AI Settings */}
+          <div className="mt-4 w-full">
+            <div className="bg-gray-800 p-4 rounded-lg w-full">
+              <p className="text-white text-center font-medium mb-2">
+                {getGameStatus()}
+              </p>
 
-            {testResponse && (
-              <div className="mt-2 p-4 bg-gray-800 text-white rounded-lg w-full max-w-md">
-                {testResponse.error ? (
-                  <div className="text-red-400 font-mono">
-                    <span className="font-bold">Error:</span>{" "}
-                    {testResponse.error}
+              <div className="flex justify-center gap-4 items-center mt-2">
+                <div>
+                  <span className="text-white mr-2">AI Difficulty:</span>
+                  <div className="flex gap-2">
+                    {[2, 3, 4].map((level) => (
+                      <button
+                        key={level}
+                        onClick={() => changeAiLevel(level as AILevel)}
+                        className={`px-3 py-1 rounded text-white ${
+                          aiLevel === level
+                            ? "bg-green-600"
+                            : "bg-gray-700 hover:bg-gray-600"
+                        }`}
+                        title={`Depth ${level}: AI looks ${level} moves ahead. Higher = stronger but slower.`}
+                      >
+                        {level}
+                      </button>
+                    ))}
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="bg-blue-900/50 p-2 rounded">
-                      <span className="font-semibold text-blue-300">
-                        Status:
-                      </span>
-                      <span className="ml-2">{testResponse.status}</span>
-                    </div>
-                    <div className="bg-blue-900/50 p-2 rounded">
-                      <span className="font-semibold text-blue-300">
-                        You sent:
-                      </span>
-                      <span className="ml-2 font-mono">
-                        {testResponse.received}
-                      </span>
-                    </div>
-                    <div className="bg-green-900/50 p-2 rounded">
-                      <span className="font-semibold text-green-300">
-                        Response:
-                      </span>
-                      <span className="ml-2">{testResponse.response}</span>
-                    </div>
+                  <div className="text-gray-400 text-xs mt-1 text-center">
+                    Higher depth = stronger but slower
                   </div>
-                )}
+                </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
 
