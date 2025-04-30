@@ -86,8 +86,11 @@ export default function Home() {
   // AI configuration
   const [whitePlayer, setWhitePlayer] = useState<PlayerType>("human");
   const [blackPlayer, setBlackPlayer] = useState<PlayerType>("ai");
-  const [aiLevel, setAiLevel] = useState<AILevel>(2);
+  const [aiLevel, setAiLevel] = useState<AILevel>(4);
   const [aiEvaluation, setAiEvaluation] = useState<number | null>(null);
+  const [useNeuralMinimax, setUseNeuralMinimax] = useState<boolean>(true);
+  const [topMovesCount, setTopMovesCount] = useState<number>(8);
+  const [firstMoveAllLegal, setFirstMoveAllLegal] = useState<boolean>(true);
 
   // Effect to clear best move arrow when best move is toggled off
   useEffect(() => {
@@ -129,7 +132,15 @@ export default function Home() {
     };
 
     makeAiMove();
-  }, [game, whitePlayer, blackPlayer, aiLevel]);
+  }, [
+    game,
+    whitePlayer,
+    blackPlayer,
+    aiLevel,
+    useNeuralMinimax,
+    topMovesCount,
+    firstMoveAllLegal,
+  ]);
 
   // Responsive board sizing
   useEffect(() => {
@@ -177,7 +188,7 @@ export default function Home() {
     return `${file}${rank}` as Square;
   }
 
-  // Clean fetchAiMove function with no debugging logs
+  // Updated fetchAiMove function to include neural minimax parameter
   async function fetchAiMove(fen: string, depth: number, isWhite: boolean) {
     try {
       // Create request data
@@ -186,6 +197,9 @@ export default function Home() {
         message: fen,
         depth: depth,
         isWhite: isWhite,
+        top_n: topMovesCount,
+        use_neural_minimax: useNeuralMinimax,
+        first_move_all_legal: firstMoveAllLegal,
       };
 
       // Make the request
@@ -569,6 +583,18 @@ export default function Home() {
     setAiLevel(level);
   }
 
+  function toggleNeuralMinimax() {
+    setUseNeuralMinimax((prev) => !prev);
+  }
+
+  function toggleFirstMoveAllLegal() {
+    setFirstMoveAllLegal((prev) => !prev);
+  }
+
+  function changeTopMovesCount(count: number) {
+    setTopMovesCount(count);
+  }
+
   return (
     <div className="h-full flex flex-col p-4">
       <div className="flex-1 flex gap-8 justify-center items-start min-h-0">
@@ -696,7 +722,7 @@ export default function Home() {
                 <div>
                   <span className="text-white mr-2">AI Difficulty:</span>
                   <div className="flex gap-2">
-                    {[2, 3, 4].map((level) => (
+                    {[2, 3, 4, 5, 6].map((level) => (
                       <button
                         key={level}
                         onClick={() => changeAiLevel(level as AILevel)}
@@ -714,6 +740,68 @@ export default function Home() {
                   <div className="text-gray-400 text-xs mt-1 text-center">
                     Higher depth = stronger but slower
                   </div>
+                </div>
+              </div>
+
+              {/* Neural Minimax Settings */}
+              <div className="mt-4 border-t border-gray-700 pt-4">
+                <div className="flex flex-col items-center">
+                  <div className="flex items-center mb-2">
+                    <span className="text-white mr-2">Search Mode:</span>
+                    <button
+                      onClick={toggleNeuralMinimax}
+                      className={`px-4 py-2 rounded text-white transition-colors ${
+                        useNeuralMinimax
+                          ? "bg-purple-600 hover:bg-purple-700"
+                          : "bg-gray-700 hover:bg-gray-600"
+                      }`}
+                      title="Neural Minimax uses the neural network at every level of search, making it faster and able to search deeper"
+                    >
+                      {useNeuralMinimax ? "Neural Guided" : "Standard Search"}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center mt-2">
+                    <span className="text-white mr-2">First Move:</span>
+                    <button
+                      onClick={toggleFirstMoveAllLegal}
+                      className={`px-4 py-2 rounded text-white transition-colors ${
+                        firstMoveAllLegal
+                          ? "bg-green-600 hover:bg-green-700"
+                          : "bg-gray-700 hover:bg-gray-600"
+                      }`}
+                      title="Consider all legal moves at the first level, then filter with neural network at deeper levels"
+                    >
+                      {firstMoveAllLegal
+                        ? "All Legal Moves"
+                        : "Neural Filtered"}
+                    </button>
+                  </div>
+
+                  {useNeuralMinimax && (
+                    <div className="flex items-center mt-2">
+                      <span className="text-white mr-2">Candidate Moves:</span>
+                      <div className="flex gap-2">
+                        {[4, 6, 8, 10, 12].map((count) => (
+                          <button
+                            key={count}
+                            onClick={() => changeTopMovesCount(count)}
+                            className={`px-3 py-1 rounded text-white ${
+                              topMovesCount === count
+                                ? "bg-purple-600"
+                                : "bg-gray-700 hover:bg-gray-600"
+                            }`}
+                            title={`Consider top ${count} moves at each position. Lower = faster but might miss good moves.`}
+                          >
+                            {count}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="text-gray-400 text-xs ml-2">
+                        Moves per position
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
